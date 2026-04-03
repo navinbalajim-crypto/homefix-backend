@@ -9,100 +9,33 @@ const generateToken = (userId) => {
   return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '30d' });
 };
 
-exports.sendOTP = async (req, res) => {
-  try {
-    const { phone } = req.body;
-    
-    if (!phone) {
-      return res.status(400).json({ success: false, message: 'Phone number required' });
-    }
-
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
-    const user = await User.findOne({ phone });
-    
-    if (user) {
-      user.otp = otp;
-      user.otpExpiry = Date.now() + 300000;
-      await user.save();
-    } else {
-      await User.create({
-        uid: uuidv4(),
-        phone,
-        name: '',
-        role: 'user'
-      });
-    }
-
-    console.log(`OTP for ${phone}: ${otp}`);
-    
-    res.json({
-      success: true,
-      message: 'OTP sent successfully',
-      otp: otp,
-      phone
-    });
-  } catch (error) {
-    console.error('Send OTP error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
-exports.verifyOTP = async (req, res) => {
-  try {
-    const { phone, otp, name } = req.body;
-    
-    if (!phone || !otp) {
-      return res.status(400).json({ success: false, message: 'Phone and OTP required' });
-    }
-
-    const user = await User.findOne({ phone });
-    
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    if (name && !user.name) {
-      user.name = name;
-      await user.save();
-    }
-
-    const token = generateToken(user._id);
-    
-    res.json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user: {
-        uid: user.uid,
-        name: user.name,
-        phone: user.phone,
-        role: user.role
-      }
-    });
-  } catch (error) {
-    console.error('Verify OTP error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
 exports.register = async (req, res) => {
   try {
-    const { name, phone, email } = req.body;
+    const { name, phone, email, password, address, role } = req.body;
     
-    let user = await User.findOne({ phone });
-    
-    if (user) {
-      user.name = name;
-      user.email = email;
-      await user.save();
-    } else {
-      user = await User.create({
-        uid: uuidv4(),
-        name,
-        phone,
-        email
-      });
+    if (!name || !phone || !password) {
+      return res.status(400).json({ success: false, message: 'Name, phone and password are required' });
     }
+    
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    }
+    
+    const existingUser = await User.findOne({ phone });
+    
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'Phone number already registered' });
+    }
+    
+    const user = await User.create({
+      uid: uuidv4(),
+      name,
+      phone,
+      email: email || '',
+      password,
+      address: address || '',
+      role: role === 'worker' ? 'worker' : 'user'
+    });
     
     const token = generateToken(user._id);
     
@@ -125,12 +58,22 @@ exports.register = async (req, res) => {
 
 exports.login = async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone, password } = req.body;
+    
+    if (!phone || !password) {
+      return res.status(400).json({ success: false, message: 'Phone and password are required' });
+    }
     
     const user = await User.findOne({ phone });
     
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return res.status(401).json({ success: false, message: 'Phone number not registered. Please sign up first.' });
+    }
+    
+    const isMatch = await user.comparePassword(password);
+    
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Incorrect password. Please try again.' });
     }
     
     const token = generateToken(user._id);
@@ -156,7 +99,7 @@ exports.adminLogin = async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    if (username === 'admin' && (password === 'homefix2024' || password === 'admin123')) {
+    if (username === 'admin' && password === 'admin123') {
       const token = generateToken('admin');
       return res.json({
         success: true,
@@ -165,8 +108,80 @@ exports.adminLogin = async (req, res) => {
       });
     }
     
-    res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (username !== 'admin') {
+      return res.status(401).json({ success: false, message: 'Invalid admin username' });
+    }
+    
+    if (password !== 'admin123') {
+      return res.status(401).json({ success: false, message: 'Incorrect admin password' });
+    }
+    
+    res.status(401).json({ success: false, message: 'Invalid admin credentials' });
   } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+exports.sendOTP = async (req, res) => {
+  try {
+    const { phone } = req.body;
+    
+    if (!phone) {
+      return res.status(400).json({ success: false, message: 'Phone number required' });
+    }
+
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const user = await User.findOne({ phone });
+    
+    if (user) {
+      user.otp = otp;
+      user.otpExpiry = Date.now() + 300000;
+      await user.save();
+    }
+
+    console.log(`OTP for ${phone}: ${otp}`);
+    
+    res.json({
+      success: true,
+      message: 'OTP sent successfully',
+      otp: otp,
+      phone
+    });
+  } catch (error) {
+    console.error('Send OTP error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+exports.verifyOTP = async (req, res) => {
+  try {
+    const { phone, otp } = req.body;
+    
+    if (!phone || !otp) {
+      return res.status(400).json({ success: false, message: 'Phone and OTP required' });
+    }
+
+    const user = await User.findOne({ phone });
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const token = generateToken(user._id);
+    
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token,
+      user: {
+        uid: user.uid,
+        name: user.name,
+        phone: user.phone,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error('Verify OTP error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };

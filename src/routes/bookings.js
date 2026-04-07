@@ -8,6 +8,70 @@ router.post('/create', bookingController.createBooking);
 router.get('/user/:id', bookingController.getUserBookings);
 router.get('/all', bookingController.getAllBookings);
 
+// Get pending bookings for a worker (by worker _id)
+router.get('/worker/:workerId/pending', async (req, res) => {
+  try {
+    const Booking = require('../models/Booking');
+    const bookings = await Booking.find({ 
+      workerId: req.params.workerId,
+      status: 'pending'
+    }).populate('userId', 'name phone address').sort({ createdAt: -1 });
+    res.json({ success: true, bookings });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Accept or reject booking (public for demo)
+router.post('/worker/:workerId/respond', async (req, res) => {
+  try {
+    const Booking = require('../models/Booking');
+    const { bookingId, action } = req.body;
+    
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+    
+    if (action === 'accept') {
+      booking.status = 'accepted';
+    } else if (action === 'decline') {
+      booking.status = 'cancelled';
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid action' });
+    }
+    
+    await booking.save();
+    res.json({ success: true, message: `Booking ${action}ed`, booking });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Update booking status (public for demo)
+router.patch('/status/:bookingId', async (req, res) => {
+  try {
+    const Booking = require('../models/Booking');
+    const { status } = req.body;
+    
+    const booking = await Booking.findById(req.params.bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+    
+    booking.status = status;
+    if (status === 'completed') {
+      booking.completedAt = new Date();
+      booking.paymentStatus = 'paid';
+    }
+    
+    await booking.save();
+    res.json({ success: true, message: `Booking ${status}`, booking });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Simple test create booking - completely fresh user
 router.post('/test-create', async (req, res) => {
   try {
